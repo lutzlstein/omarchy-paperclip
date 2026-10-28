@@ -91,7 +91,7 @@ are not changed.
 | Action | Mouse | Keyboard (panel open) |
 |--------|-------|-----------------------|
 | Open or close the panel | Left-click the bar icon | Esc closes |
-| Start or stop the service | Right-click the bar icon, or the header switch | S |
+| Start or stop the service | The header switch | S |
 | View colored logs (`journalctl -f`) | Middle-click the bar icon | V |
 | Open the web UI | | O |
 | Refresh status | | R |

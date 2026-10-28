@@ -605,8 +605,7 @@ Panel {
     foreground: root.running ? Color.accent : Color.muted
     tooltipText: root.opened ? "" : "PaperclipAI: " + (root.setupMode ? "not set up" : root.status)
     onPressed: function(b) {
-      if (b === Qt.RightButton) root.toggleService()
-      else if (b === Qt.MiddleButton) root.openLogs()
+      if (b === Qt.MiddleButton) root.openLogs()
       else root.toggle()
     }
   }
@@ -764,8 +763,8 @@ Panel {
               wrapMode: Text.WordWrap
             }
 
-            InfoPair { visible: root.health !== null; label: "Version"; value: root.health ? (root.health.version || "—") : "" }
-            InfoPair { visible: root.health !== null; label: "Uptime"; value: root.uptimeText() }
+            InfoPair { visible: root.health !== null && !!root.health.version; label: "Version"; value: root.health ? (root.health.version || "—") : "" }
+            InfoPair { visible: root.health !== null && !!(root.health.serverInfo && root.health.serverInfo.processStartedAt); label: "Uptime"; value: root.uptimeText() }
             InfoPair { visible: root.health !== null; label: "Bootstrap"; value: root.health ? (root.health.bootstrapStatus || "—") : "" }
             InfoPair { visible: root.health !== null && typeof root.health.deploymentMode === "string"; label: "Mode"; value: root.health ? String(root.health.deploymentMode || "") + (root.health.deploymentExposure ? " · " + root.health.deploymentExposure : "") : "" }
             InfoPair { visible: root.health !== null && typeof root.health.authReady === "boolean"; label: "Auth"; value: root.health && root.health.authReady ? "ready" : "not ready" }
