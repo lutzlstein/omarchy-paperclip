@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.lutzlstein.paperclip",
   "name": "Paperclip AI",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Cory Blische",
   "license": "MIT",
   "description": "Status, start/stop, logs and health for a local PaperclipAI service.",
@@ -19,7 +19,8 @@
     "allowMultiple": false,
     "defaults": {
       "apiUrl": "http://localhost:3100",
-      "serviceUnit": "paperclipai.service"
+      "serviceUnit": "paperclipai.service",
+      "tailnetHttpsPort": 443
     },
     "schema": [
       {
@@ -35,6 +36,16 @@
         "label": "systemd user unit",
         "defaultValue": "paperclipai.service",
         "description": "User service to monitor, start, stop and tail logs for."
+      },
+      {
+        "key": "tailnetHttpsPort",
+        "type": "integer",
+        "label": "Tailnet HTTPS port",
+        "defaultValue": 443,
+        "description": "HTTPS port on your tailnet hostname used by `tailscale serve` when Tailscale is running. Only this port's serve config is changed.",
+        "min": 1,
+        "max": 65535,
+        "step": 1
       }
     ],
     "defaultSection": "center"

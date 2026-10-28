@@ -29,16 +29,40 @@ Panel {
   property string pendingStatus: ""
   readonly property bool busy: pendingStatus !== "" && pendingStatus !== status
 
+  // ---- Network mode. Localhost-only is the default; the tailnet section
+  // appears only when Tailscale is installed, logged in and running.
+  // (Room for a future "setup" state, e.g. PaperclipAI not installed.)
+  readonly property bool tailnetEnabled: true
+  readonly property int tailnetHttpsPort: validPort(setting("tailnetHttpsPort", 443))
+  readonly property int localPort: validPort(portFromUrl(apiUrl))
+  readonly property bool tailnetConfigValid: tailnetHttpsPort > 0 && localPort > 0
+  // "checking" | "missing" | "loggedOut" | "off" | "on" | "conflict" | "invalid" | "error"
+  property string tailnetState: "checking"
+  property string tailnetHost: ""
+  property string tailnetDetail: ""
+  property int tailnetGeneration: 0
+  property string tailnetOutBuf: ""
+  property bool tailnetOverflow: false
+  readonly property int tailnetMaxBytes: 65536
+  readonly property bool tailnetVisible: tailnetState === "on" || tailnetState === "off"
+    || tailnetState === "conflict" || (tailnetBusy && tailnetHost !== "")
+  readonly property bool tailnetBusy: tailnetToggleProc.running
+  readonly property string tailnetUrl: tailnetHost === "" ? ""
+    : "https://" + tailnetHost + (tailnetHttpsPort === 443 ? "" : ":" + tailnetHttpsPort)
+
   property var health: null
   property string healthError: ""
 
   // Keyboard cursor: one flat list of controls, top to bottom.
   //   0 = service switch, then one entry per action below.
-  readonly property var actions: [
+  readonly property var actions: (tailnetVisible ? [
+    { key: "tailnet", icon: "󰖂", label: tailnetActionLabel(), hotkey: "T" },
+    { key: "copyurl", icon: "󰆏", label: "Copy tailnet URL", hotkey: "C" }
+  ] : []).concat([
     { key: "logs", icon: "󰦪", label: "View logs", hotkey: "V" },
     { key: "web", icon: "󰖟", label: "Open web UI", hotkey: "O" },
     { key: "refresh", icon: "󰑐", label: "Refresh status", hotkey: "R" }
-  ]
+  ])
   readonly property int cursorCount: actions.length + 1
   property int cursorIndex: 0
   property bool cursorActive: false
@@ -83,18 +107,118 @@ Panel {
     close()
   }
 
+  function validPort(value) {
+    var n = Number(value)
+    return (Number.isInteger(n) && n >= 1 && n <= 65535) ? n : 0
+  }
+
+  // Explicit port from apiUrl, else 3100 (PaperclipAI's default).
+  function portFromUrl(url) {
+    var m = /^[a-z]+:\/\/(?:\[[^\]]*\]|[^\/:?#]*)(?::(\d{1,5}))?/i.exec(String(url))
+    return m && m[1] ? Number(m[1]) : 3100
+  }
+
+  function tailnetActionLabel() {
+    if (tailnetBusy) return "Tailnet: working…"
+    if (tailnetState === "on") return "Stop tailnet serve"
+    if (tailnetState === "off") return "Serve on tailnet"
+    if (tailnetState === "conflict") return "Tailnet port in use"
+    if (tailnetState === "invalid") return "Tailnet: invalid port"
+    return "Tailnet: " + tailnetState
+  }
+
+  function tailnetStateText() {
+    switch (tailnetState) {
+      case "on": return "serving"
+      case "off": return "not serving"
+      case "conflict": return "port " + tailnetHttpsPort + " used elsewhere"
+      case "invalid": return "invalid port setting"
+      case "error": return "error"
+      default: return tailnetState
+    }
+  }
+
+  function pollTailnet() {
+    if (!tailnetEnabled) return
+    if (!tailnetConfigValid) { tailnetState = "invalid"; return }
+    if (tailnetToggleProc.running || tailnetProc.running) return
+    tailnetGeneration += 1
+    tailnetOutBuf = ""
+    tailnetOverflow = false
+    tailnetProc.stage = "status"
+    tailnetProc.generation = tailnetGeneration
+    tailnetProc.running = true
+  }
+
+  // Input: {"status": <tailscale status --json --peers=false>, "serve": <serve status --json>}
+  function applyTailnet(statusObj, serveObj) {
+    var backend = statusObj && typeof statusObj.BackendState === "string" ? statusObj.BackendState : ""
+    var self = statusObj && statusObj.Self ? statusObj.Self : null
+    var host = self && typeof self.DNSName === "string" ? self.DNSName.replace(/\.$/, "") : ""
+    tailnetHost = /^[A-Za-z0-9.-]{1,253}$/.test(host) ? host : ""
+    if (backend !== "Running") { tailnetState = "loggedOut"; tailnetDetail = backend; return }
+    var web = serveObj && serveObj.Web && typeof serveObj.Web === "object" ? serveObj.Web : {}
+    var tcp = serveObj && serveObj.TCP && typeof serveObj.TCP === "object" ? serveObj.TCP : {}
+    var suffix = ":" + tailnetHttpsPort
+    var entry = null
+    for (var key in web) {
+      if (key.length > suffix.length && key.slice(-suffix.length) === suffix) { entry = web[key]; break }
+    }
+    var tcpEntry = tcp[String(tailnetHttpsPort)]
+    if (!entry) {
+      // A raw TCP forward on this port is someone else's config.
+      tailnetState = tcpEntry && tcpEntry.TCPForward ? "conflict" : "off"
+      tailnetDetail = tcpEntry && tcpEntry.TCPForward ? String(tcpEntry.TCPForward).slice(0, 120) : ""
+      return
+    }
+    var handlers = entry.Handlers || {}
+    var rootH = handlers["/"]
+    var proxy = rootH && typeof rootH.Proxy === "string" ? rootH.Proxy.replace(/\/+$/, "") : ""
+    var ours = proxy === "http://127.0.0.1:" + localPort || proxy === "http://localhost:" + localPort
+      || proxy === "127.0.0.1:" + localPort || proxy === "localhost:" + localPort
+    var count = 0
+    for (var h in handlers) count += 1
+    if (ours && count === 1) { tailnetState = "on"; tailnetDetail = ""; return }
+    tailnetState = "conflict"
+    tailnetDetail = proxy !== "" ? proxy.slice(0, 120) : "other handlers"
+  }
+
+  function toggleTailnet() {
+    if (!tailnetEnabled || tailnetBusy) return
+    if (!tailnetConfigValid) { tailnetState = "invalid"; return }
+    var https = "--https=" + tailnetHttpsPort
+    var argv
+    if (tailnetState === "on")
+      argv = ["timeout", "15", "tailscale", "serve", https, "off"]
+    else if (tailnetState === "off")
+      argv = ["timeout", "15", "tailscale", "serve", "--bg", https, "http://127.0.0.1:" + localPort]
+    else return   // never overwrite a conflicting mapping or act while logged out
+    tailnetGeneration += 1   // drop any in-flight status read
+    tailnetState = "checking"
+    tailnetToggleProc.command = argv
+    tailnetToggleProc.running = true
+  }
+
+  function copyTailnetUrl() {
+    if (tailnetUrl === "") return
+    Quickshell.execDetached(["wl-copy", "--", tailnetUrl])
+  }
+
   function pollStatus() {
     if (!statusProc.running) statusProc.running = true
   }
 
   function refresh() {
     pollStatus()
+    pollTailnet()
     if (healthProc.running) return
     healthProc.running = true
   }
 
   function runAction(key) {
-    if (key === "logs") openLogs()
+    if (key === "tailnet") toggleTailnet()
+    else if (key === "copyurl") copyTailnetUrl()
+    else if (key === "logs") openLogs()
     else if (key === "web") openWeb()
     else if (key === "refresh") refresh()
   }
@@ -203,6 +327,72 @@ Panel {
     }
   }
 
+  Timer {
+    interval: 5000
+    repeat: true
+    running: root.opened && root.tailnetEnabled
+    onTriggered: root.pollTailnet()
+  }
+
+
+  // Two bounded reads in sequence: tailscale status, then serve status.
+  // Each has a 5 s `timeout`; stdout is capped while receiving.
+  // `timeout` exits 127 when tailscale is not installed.
+  Process {
+    id: tailnetProc
+    property int generation: 0
+    property string stage: "status"
+    property var statusDoc: null
+    command: stage === "status"
+      ? ["timeout", "5", "tailscale", "status", "--json", "--peers=false"]
+      : ["timeout", "5", "tailscale", "serve", "status", "--json"]
+    stdout: SplitParser {
+      onRead: function(line) {
+        if (root.tailnetOverflow) return
+        if (root.tailnetOutBuf.length + line.length > root.tailnetMaxBytes) {
+          root.tailnetOverflow = true
+          root.tailnetOutBuf = ""
+          tailnetProc.signal(15)
+          return
+        }
+        root.tailnetOutBuf += line + "\n"
+      }
+    }
+    onExited: function(exitCode) {
+      var raw = root.tailnetOutBuf
+      root.tailnetOutBuf = ""
+      var overflow = root.tailnetOverflow
+      root.tailnetOverflow = false
+      var st = stage
+      stage = "status"
+      if (generation !== root.tailnetGeneration) return
+      if (exitCode === 127) { root.tailnetState = "missing"; return }
+      if (overflow) { root.tailnetState = "error"; root.tailnetDetail = "status output too large"; return }
+      var doc = null
+      try { doc = raw.trim().charAt(0) === "{" ? JSON.parse(raw) : null } catch (e) { doc = null }
+      if (st === "status") {
+        if (!doc) { root.tailnetState = "loggedOut"; root.tailnetDetail = ""; return }
+        if (doc.BackendState !== "Running") { root.applyTailnet(doc, null); return }
+        statusDoc = doc
+        stage = "serve"
+        Qt.callLater(function() { if (tailnetProc.generation === root.tailnetGeneration) tailnetProc.running = true })
+        return
+      }
+      if (exitCode !== 0) { root.tailnetState = "error"; root.tailnetDetail = "tailscale serve status failed"; return }
+      // Empty or non-JSON output means no serve config.
+      root.applyTailnet(statusDoc, doc || {})
+    }
+  }
+
+  Process {
+    id: tailnetToggleProc
+    stderr: StdioCollector { id: tailnetToggleErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.tailnetDetail = String(tailnetToggleErr.text || "tailscale serve failed").trim().slice(0, 160)
+      root.pollTailnet()
+    }
+  }
+
   IpcHandler {
     target: root.ipcTarget
     function open(): void { root.open() }
@@ -211,6 +401,8 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function toggleService(): void { root.toggleService() }
+    function toggleTailnet(): void { root.toggleTailnet() }
+    function tailnetStatus(): string { return root.tailnetState }
     function status(): string { return root.status }
   }
 
@@ -251,6 +443,8 @@ Panel {
         else if (k === "v") root.openLogs()
         else if (k === "o") root.openWeb()
         else if (k === "r") root.refresh()
+        else if (k === "t") root.toggleTailnet()
+        else if (k === "c") root.copyTailnetUrl()
       }
 
       Flickable {
@@ -363,6 +557,33 @@ Panel {
             }
           }
 
+          Column {
+            visible: root.tailnetVisible
+            width: parent.width
+            spacing: Style.spacing.labelGap
+
+            PanelSectionHeader {
+              text: "TAILNET"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+            InfoPair { label: "Serve"; value: root.tailnetBusy ? "working…" : root.tailnetStateText() }
+            InfoPair { visible: root.tailnetUrl !== ""; label: "URL"; value: root.tailnetUrl }
+            InfoPair { label: "Maps"; value: ":" + root.tailnetHttpsPort + " → 127.0.0.1:" + root.localPort }
+            Text {
+              visible: root.tailnetDetail !== "" && root.tailnetState !== "on" && root.tailnetState !== "off"
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.tailnetState === "conflict"
+                ? "Held by " + root.tailnetDetail + ". Left unchanged."
+                : root.tailnetDetail
+              color: Commons.Color.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+          }
+
           PanelSeparator { foreground: root.foreground }
 
           // ---- Actions: keyboard cursor targets 1..n
@@ -381,7 +602,10 @@ Panel {
                 text: modelData.label + "   " + modelData.hotkey
                 foreground: root.foreground
                 fontFamily: root.fontFamily
-                enabled: modelData.key === "refresh" || root.running
+                enabled: modelData.key === "refresh"
+                  || (modelData.key === "tailnet" ? (!root.tailnetBusy && (root.tailnetState === "on" || root.tailnetState === "off"))
+                  : modelData.key === "copyurl" ? root.tailnetUrl !== ""
+                  : root.running)
                 hasCursor: root.cursorActive && root.cursorIndex === index + 1
                 onHovered: function(h) { if (h) root.setCursor(index + 1) }
                 onClicked: root.runAction(modelData.key)
