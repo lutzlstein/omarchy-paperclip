@@ -53,10 +53,10 @@ a SETUP view:
    `y` before running PaperclipAI's official quickstart:
 
    ```bash
-   npx paperclipai@latest onboard --yes --install-service
+   npx paperclipai@2026.1023.0 onboard --yes --install-service
    ```
 
-   That downloads the latest `paperclipai` from npm, creates a trusted
+   That downloads a pinned `paperclipai` release (2026.1023.0) from npm, creates a trusted
    **localhost-only** (loopback) instance and installs `paperclipai.service`
    as a systemd user service. Copy (C) puts the same command on the clipboard
    if you'd rather run it yourself.
@@ -175,7 +175,7 @@ overwrites it. If PaperclipAI is in authenticated mode, set its
   --https=<tailnetHttpsPort> off` to turn off. Copy runs `wl-copy`.
 
 Set up opens a visible terminal and, only after you type `y`, runs
-`npx paperclipai@latest onboard --yes --install-service`, which downloads code
+`npx paperclipai@2026.1023.0 onboard --yes --install-service`, which downloads code
 from npm, writes PaperclipAI's config and data under `~/.paperclip` and installs
 and starts a systemd user service.
 

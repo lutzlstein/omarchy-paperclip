@@ -69,7 +69,8 @@ Panel {
   // Source: paperclipai README Quickstart + `paperclipai onboard --help`.
   // Loopback (localhost-only) is the quickstart default; --install-service
   // registers the paperclipai.service systemd user unit.
-  readonly property string setupCommand: "npx paperclipai@latest onboard --yes --install-service"
+  readonly property string paperclipVersion: "2026.1023.0"
+  readonly property string setupCommand: "npx paperclipai@" + paperclipVersion + " onboard --yes --install-service"
   readonly property int nodeMinMajor: 24
   readonly property int nodeMinMinor: 11
 
@@ -289,11 +290,11 @@ Panel {
     if (setupState !== "ready") return
     var script = 'printf "PaperclipAI setup (localhost-only by default)\\n\\nThis will run:\\n  %s\\n\\n" "$1"; ' +
       'read -r -p "Continue? [y/N] " ans; ' +
-      'if [[ $ans == [yY]* ]]; then npx paperclipai@latest onboard --yes --install-service; ' +
+      'if [[ $ans == [yY]* ]]; then npx "paperclipai@$2" onboard --yes --install-service; ' +
       'echo; echo "Setup finished (exit $?)."; else echo "Cancelled."; fi; ' +
       'read -r -p "Press Enter to close. " _'
     Quickshell.execDetached(["omarchy-launch-tui", "--app-id=io.github.lutzlstein.paperclip.setup",
-      "bash", "-c", script, "paperclip-setup", setupCommand])
+      "bash", "-c", script, "paperclip-setup", setupCommand, paperclipVersion])
     close()
   }
 

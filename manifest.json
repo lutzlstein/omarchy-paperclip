@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.lutzlstein.paperclip",
   "name": "Paperclip AI",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": "Cory Blische",
   "license": "MIT",
   "description": "Set up, run and monitor PaperclipAI: guided npx setup, start/stop, logs, health, adapter logins and optional private tailnet serve.",
