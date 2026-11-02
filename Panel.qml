@@ -49,6 +49,13 @@ Panel {
   readonly property bool tailnetVisible: tailnetState === "on" || tailnetState === "off"
     || tailnetState === "conflict" || (tailnetBusy && tailnetHost !== "")
   readonly property bool tailnetBusy: tailnetToggleProc.running
+  // Serve may only be turned ON when Paperclip requires login. Unknown or
+  // unreachable health counts as not authenticated. Turning OFF always works.
+  readonly property string deploymentMode: health && typeof health.deploymentMode === "string" ? health.deploymentMode : ""
+  readonly property bool tailnetAuthOk: deploymentMode === "authenticated"
+  readonly property string tailnetAuthWarning: tailnetAuthOk ? ""
+    : (deploymentMode === "" ? "Mode unknown; serve requires authenticated mode"
+      : "Requires authenticated mode; " + deploymentMode + " would expose Paperclip to every tailnet peer")
   readonly property string tailnetUrl: tailnetHost === "" ? ""
     : "https://" + tailnetHost + (tailnetHttpsPort === 443 ? "" : ":" + tailnetHttpsPort)
 
@@ -232,7 +239,7 @@ Panel {
     var argv
     if (tailnetState === "on")
       argv = ["timeout", "15", "tailscale", "serve", https, "off"]
-    else if (tailnetState === "off")
+    else if (tailnetState === "off" && tailnetAuthOk)
       argv = ["timeout", "15", "tailscale", "serve", "--bg", https, "http://127.0.0.1:" + localPort]
     else return   // never overwrite a conflicting mapping or act while logged out
     tailnetGeneration += 1   // drop any in-flight status read
@@ -593,7 +600,14 @@ Panel {
     function toggle(): void { root.toggle() }
     function toggleService(): void { root.toggleService() }
     function toggleTailnet(): void { root.toggleTailnet() }
-    function tailnetStatus(): string { return root.tailnetState }
+    function tailnetStatus(): string {
+      return JSON.stringify({
+        state: root.tailnetState,
+        mode: root.deploymentMode || "unknown",
+        canEnable: root.tailnetState === "off" && root.tailnetAuthOk,
+        warning: root.tailnetAuthWarning
+      })
+    }
     function status(): string { return root.setupMode ? "setup" : root.status }
     function setupStatus(): string { return root.setupState }
   }
@@ -821,6 +835,19 @@ Panel {
             InfoPair { visible: root.tailnetUrl !== ""; label: "URL"; value: root.tailnetUrl }
             InfoPair { label: "Maps"; value: ":" + root.tailnetHttpsPort + " → 127.0.0.1:" + root.localPort }
             Text {
+              // Shown while serve is off (ON is blocked) or already on (left as is).
+              visible: root.tailnetAuthWarning !== "" && (root.tailnetState === "off" || root.tailnetState === "on")
+              width: parent.width
+              wrapMode: Text.Wrap
+              textFormat: Text.PlainText
+              text: root.tailnetState === "on"
+                ? "Warning: serve is on but " + root.tailnetAuthWarning.charAt(0).toLowerCase() + root.tailnetAuthWarning.slice(1) + ". Left unchanged."
+                : root.tailnetAuthWarning
+              color: Commons.Color.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+            Text {
               visible: root.tailnetDetail !== "" && root.tailnetState !== "on" && root.tailnetState !== "off"
               width: parent.width
               textFormat: Text.PlainText
@@ -854,7 +881,7 @@ Panel {
                 fontFamily: root.fontFamily
                 enabled: modelData.key === "refresh" || modelData.key === "setup"
                   || modelData.key === "copysetup" || modelData.key === "copynode"
-                  || (modelData.key === "tailnet" ? (!root.tailnetBusy && (root.tailnetState === "on" || root.tailnetState === "off"))
+                  || (modelData.key === "tailnet" ? (!root.tailnetBusy && (root.tailnetState === "on" || (root.tailnetState === "off" && root.tailnetAuthOk)))
                   : modelData.key === "copyurl" ? root.tailnetUrl !== ""
                   : root.running)
                 hasCursor: root.cursorActive && root.cursorIndex === index + root.actionBase

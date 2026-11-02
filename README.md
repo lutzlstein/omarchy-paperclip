@@ -107,7 +107,8 @@ omarchy-shell io.github.lutzlstein.paperclip toggle
 ```
 
 The IPC target also has `open`, `close`, `toggleService`, `status`,
-`toggleTailnet` and `tailnetStatus`.
+`toggleTailnet` and `tailnetStatus`. `tailnetStatus` returns JSON such as
+`{"state":"off","mode":"authenticated","canEnable":true,"warning":""}`.
 
 ## Configuration
 
@@ -135,8 +136,15 @@ and running. Otherwise it is hidden and nothing changes. The plugin does not
 install or configure Tailscale. The toggle needs your user to be allowed to
 change serve config; if it isn't, Tailscale's error is shown. When the HTTPS port
 already serves something else, the panel shows "port used elsewhere" and never
-overwrites it. If PaperclipAI is in authenticated mode, set its
-`publicBaseUrl` to the tailnet URL.
+overwrites it.
+
+Serve can only be turned **on** when `/api/health` reports
+`deploymentMode: "authenticated"`. In `local_trusted` mode (no login) every
+tailnet peer would get unauthenticated access, so the toggle is disabled and a
+warning is shown; an unreachable API or unknown mode is treated the same way.
+Turning serve off always works. If serve is already on while the mode is not
+authenticated, the panel shows a warning but leaves it running. In
+authenticated mode, set PaperclipAI's `publicBaseUrl` to the tailnet URL.
 
 ## How it works
 
